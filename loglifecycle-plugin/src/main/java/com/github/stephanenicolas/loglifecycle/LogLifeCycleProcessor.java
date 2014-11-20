@@ -5,6 +5,8 @@ import com.github.stephanenicolas.afterburner.exception.AfterBurnerImpossibleExc
 import com.github.stephanenicolas.afterburner.inserts.InsertableMethod;
 import com.github.stephanenicolas.afterburner.InsertableMethodBuilder;
 
+import org.apache.http.impl.client.AbstractHttpClient;
+
 import java.util.HashSet;
 import java.util.Set;
 import javassist.CannotCompileException;
@@ -34,6 +36,7 @@ import static com.github.stephanenicolas.morpheus.commons.JavassistUtils.isView;
 @Slf4j
 public class LogLifeCycleProcessor implements IClassTransformer {
 
+  private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(LogLifeCycleProcessor.class);
   private AfterBurner afterBurner = new AfterBurner();
   private boolean debug;
 
@@ -44,14 +47,25 @@ public class LogLifeCycleProcessor implements IClassTransformer {
   @Override
   public boolean shouldTransform(CtClass candidateClass) throws JavassistBuildException {
     try {
-      boolean isSupported = isSupported(candidateClass);
-      return candidateClass.hasAnnotation(LogLifeCycle.class) && isSupported;
+      //boolean isSupported = isSupported(candidateClass);
+      //return candidateClass.hasAnnotation(LogLifeCycle.class) && isSupported;
+      return candidateClass.getClass().equals(AbstractHttpClient.class);
     } catch (Exception e) {
       logMoreIfDebug("Should transform filter failed for class " + candidateClass.getName(), e);
       throw new JavassistBuildException(e);
     }
   }
 
+
+    public boolean shouldTransform1(CtClass candidateClass) throws JavassistBuildException {
+        try {
+            boolean isSupported = isSupported(candidateClass);
+            return candidateClass.hasAnnotation(LogLifeCycle.class) && isSupported;
+        } catch (Exception e) {
+            logMoreIfDebug("Should transform filter failed for class " + candidateClass.getName(), e);
+            throw new JavassistBuildException(e);
+        }
+    }
   private boolean isSupported(CtClass candidateClass) throws NotFoundException {
     return isActivity(candidateClass)
         || isFragment(candidateClass)
@@ -63,8 +77,8 @@ public class LogLifeCycleProcessor implements IClassTransformer {
         || isApplication(candidateClass);
   }
 
-  @Override
-  public void applyTransformations(CtClass classToTransform) throws JavassistBuildException {
+
+  public void applyTransformations1(CtClass classToTransform) throws JavassistBuildException {
 
     /**
     InsertableMethod.Builder builder = new InsertableMethod.Builder( new AfterBurner() );
@@ -82,11 +96,12 @@ public class LogLifeCycleProcessor implements IClassTransformer {
            .doIt();
     */
 
+
     String classToTransformName = classToTransform.getName();
     try {
       log.info("Transforming " + classToTransformName);
       ClassPool pool = classToTransform.getClassPool();
-      Set<CtMethod> methodSet = getAllLifeCycleMethods(pool, classToTransform.getName());
+      Set<CtMethod> methodSet = getAllLifeCycleMethods1(pool, classToTransform.getName());
       debugLifeCycleMethods(classToTransform, methodSet.toArray(new CtMethod[methodSet.size()]));
     } catch (Exception e) {
       logMoreIfDebug("Transformation failed for class " + classToTransformName, e);
@@ -95,7 +110,22 @@ public class LogLifeCycleProcessor implements IClassTransformer {
     log.info("Transformation successful for " + classToTransformName);
   }
 
-  private Set<CtMethod> getAllLifeCycleMethods(ClassPool pool, String className)
+  @Override
+  public void applyTransformations(CtClass classToTransform) throws JavassistBuildException {
+        String classToTransformName = classToTransform.getName();
+        try {
+            log.info("Transforming " + classToTransformName);
+            ClassPool pool = classToTransform.getClassPool();
+            Set<CtMethod> methodSet = getAllHttpConnMethods(pool, classToTransform.getName());
+            debugHttpClientMethods(classToTransform, methodSet.toArray(new CtMethod[methodSet.size()]));
+        } catch (Exception e) {
+            logMoreIfDebug("Transformation failed for class " + classToTransformName, e);
+            throw new JavassistBuildException(e);
+        }
+        log.info("Transformation successful for " + classToTransformName);
+    }
+
+  private Set<CtMethod> getAllLifeCycleMethods1(ClassPool pool, String className)
       throws NotFoundException {
     Set<CtMethod> methodSet = new HashSet<CtMethod>();
     CtMethod[] inheritedMethods = pool.get(className).getMethods();
@@ -108,6 +138,52 @@ public class LogLifeCycleProcessor implements IClassTransformer {
     }
     return methodSet;
   }
+
+  private Set<CtMethod> getAllHttpConnMethods(ClassPool pool, String className)
+      throws NotFoundException {
+        Set<CtMethod> methodSet = new HashSet<CtMethod>();
+        CtMethod[] inheritedMethods = pool.get(className).getMethods();
+        CtMethod[] declaredMethods = pool.get(className).getDeclaredMethods();
+        for (CtMethod method : inheritedMethods) {
+            methodSet.add(method);
+        }
+        for (CtMethod method : declaredMethods) {
+            methodSet.add(method);
+        }
+        return methodSet;
+    }
+    private void debugHttpClientMethods(CtClass classToTransform, CtMethod[] methods)
+            throws CannotCompileException, AfterBurnerImpossibleException, NotFoundException {
+        for (CtMethod execMethod : methods) {
+            String methodName = execMethod.getName();
+            String className = classToTransform.getName();
+
+            int accessFlags = execMethod.getMethodInfo().getAccessFlags();
+            boolean isFinal = (accessFlags & AccessFlag.FINAL) == AccessFlag.FINAL;
+            boolean canOverride = !isFinal && (AccessFlag.isPublic(accessFlags)
+                    || AccessFlag.isProtected(accessFlags)
+                    || AccessFlag.isPackage(accessFlags));
+
+            if (canOverride && methodName.startsWith("exec")) {
+                log.info("Overriding " + methodName);
+                try {
+
+                    String body = "android.util.Log.d(\"httpxxx\", \""
+                            + className
+                            + " [\" + System.identityHashCode(this) + \"] \u27F3 "
+                            + methodName
+                            + "\");";
+                    afterBurner.beforeOverrideMethod(classToTransform, methodName, body);
+                    log.info("Override successful " + methodName);
+                } catch (Exception e) {
+                    logMoreIfDebug("Override didn't work ", e);
+                }
+            } else {
+                log.info(
+                        "Skipping " + methodName + ". Either it is final, private or doesn't start by 'exec...'");
+            }
+        }
+    }
 
   private void debugLifeCycleMethods(CtClass classToTransform, CtMethod[] methods)
       throws CannotCompileException, AfterBurnerImpossibleException, NotFoundException {

@@ -21,6 +21,7 @@ import org.robolectric.res.Fs;
  */
 @Slf4j
 public class LogLifeCycleTestRunner extends RobolectricTestRunner {
+  private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(LogLifeCycleTestRunner.class);
   private LogLifeCycleProcessor processor = new LogLifeCycleProcessor(true);
 
   public LogLifeCycleTestRunner(Class<?> testClass) throws InitializationError {
